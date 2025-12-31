@@ -1,0 +1,22 @@
+{
+  "name": "tg-tracker-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot to track users added to groups",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "keywords": [
+    "telegram",
+    "bot",
+    "tracker"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "node-telegram-bot-api": "^0.64.0",
+    "dotenv": "^16.3.1"
+  }
+}
+
