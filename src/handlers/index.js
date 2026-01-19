@@ -1,5 +1,6 @@
 const messageHandler = require('./messageHandler');
 const commandHandler = require('./commandHandler');
+const callbackHandler = require('./callbackHandler');
 
 /**
  * Setup all event handlers
@@ -11,6 +12,9 @@ function setupHandlers(bot) {
   
   // Setup command handlers
   commandHandler.setup(bot);
+  
+  // Setup callback query handlers (button clicks)
+  callbackHandler.setup(bot);
 }
 
 module.exports = {

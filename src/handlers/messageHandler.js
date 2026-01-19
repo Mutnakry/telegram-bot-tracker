@@ -1,4 +1,8 @@
 const { addTrackedGroup, isGroupTracked, getTrackedGroup } = require('../bot');
+const { trackUserStart } = require('../modules/userTracker');
+const { trackMessage, trackJoin, trackLeave } = require('../modules/activityTracker');
+const { canPerformAction, isBanned, detectSpammer } = require('../modules/security');
+const { groupStorage } = require('../database/storage');
 
 /**
  * Setup message event handlers
@@ -9,6 +13,33 @@ function setup(bot) {
   bot.on('message', async (msg) => {
     const chatId = msg.chat.id;
     const chatType = msg.chat.type;
+    const userId = msg.from?.id;
+    
+    // Skip if no user (system messages)
+    if (!userId) {
+      return;
+    }
+    
+    // Check if banned
+    if (isBanned(userId)) {
+      return; // Silently ignore banned users
+    }
+    
+    // Track regular messages (not commands, not system messages)
+    if (msg.text && !msg.text.startsWith('/')) {
+      // Check security
+      const securityCheck = canPerformAction(userId, 'messages');
+      if (securityCheck.allowed) {
+        trackMessage(userId, chatId);
+        
+        // Detect spam
+        const spamCheck = detectSpammer(userId, {});
+        if (spamCheck.isSpammer) {
+          console.log(`⚠️ Potential spammer detected: ${userId} - ${spamCheck.reason}`);
+          // You can add auto-ban logic here if needed
+        }
+      }
+    }
     
     // Check if bot was added to a group or supergroup
     if (chatType === 'group' || chatType === 'supergroup') {
@@ -68,12 +99,20 @@ async function handleBotAdded(bot, msg, chatId, chatType, botInfo) {
         title: msg.chat.title,
         type: chatType
       });
+      
+      // Also save to group storage
+      groupStorage.saveGroup(chatId, {
+        title: msg.chat.title,
+        type: chatType,
+        added_at: new Date().toISOString()
+      });
+      
       console.log(`✅ Bot is admin in group: ${msg.chat.title}`);
       
       // Send confirmation message
       await bot.sendMessage(chatId, 
         '✅ Bot is now tracking this group!\n' +
-        'I will monitor when new members are added to this group.'
+        'I will monitor user activity, commands, and member changes.'
       );
     } else {
       console.log(`⚠️ Bot is not admin in group: ${msg.chat.title}`);
@@ -96,6 +135,7 @@ async function handleBotAdded(bot, msg, chatId, chatType, botInfo) {
  */
 async function trackNewMembers(bot, msg, chatId, newMembers, botInfo) {
   const group = getTrackedGroup(chatId);
+  const chatTitle = msg.chat.title || 'Unknown Group';
   
   for (const member of newMembers) {
     // Don't track the bot itself
@@ -106,17 +146,28 @@ async function trackNewMembers(bot, msg, chatId, newMembers, botInfo) {
       const lastName = member.last_name || '';
       const fullName = `${firstName} ${lastName}`.trim();
       
-      group.members.add(userId);
+      // Track user start if not already tracked
+      trackUserStart(userId, member);
+      
+      // Track join event
+      trackJoin(userId, chatId, chatTitle);
+      
+      // Update group members
+      if (group) {
+        group.members.add(userId);
+      }
       
       console.log(`\n📊 NEW MEMBER ADDED TO GROUP:`);
-      console.log(`   Group: ${group.title}`);
+      console.log(`   Group: ${chatTitle}`);
       console.log(`   User ID: ${userId}`);
       console.log(`   Name: ${fullName}`);
       console.log(`   Username: @${username}`);
-      console.log(`   Time: ${new Date().toLocaleString()}`);
-      console.log(`   Total members tracked: ${group.members.size}\n`);
+      console.log(`   Language: ${member.language_code || 'N/A'}`);
+      console.log(`   Time: ${new Date().toLocaleString()}\n`);
       
-      // Send notification to group (optional)
+      // Optional: Send notification to group
+      // Uncomment if you want notifications
+      /*
       await bot.sendMessage(chatId, 
         `👤 New member added:\n` +
         `   Name: ${fullName}\n` +
@@ -124,6 +175,7 @@ async function trackNewMembers(bot, msg, chatId, newMembers, botInfo) {
         `   User ID: ${userId}\n` +
         `   Time: ${new Date().toLocaleString()}`
       );
+      */
     }
   }
 }
@@ -142,14 +194,23 @@ async function handleMemberLeft(bot, msg, chatId) {
   const group = getTrackedGroup(chatId);
   const leftMember = msg.left_chat_member;
   const botInfo = await bot.getMe();
+  const chatTitle = msg.chat.title || 'Unknown Group';
   
   // Don't track if bot itself left
   if (leftMember.id !== botInfo.id) {
-    group.members.delete(leftMember.id);
+    const userId = leftMember.id;
+    
+    // Track leave event
+    trackLeave(userId, chatId, chatTitle);
+    
+    // Update group members
+    if (group) {
+      group.members.delete(userId);
+    }
     
     console.log(`\n📊 MEMBER LEFT GROUP:`);
-    console.log(`   Group: ${group.title}`);
-    console.log(`   User ID: ${leftMember.id}`);
+    console.log(`   Group: ${chatTitle}`);
+    console.log(`   User ID: ${userId}`);
     console.log(`   Name: ${leftMember.first_name || 'Unknown'}`);
     console.log(`   Time: ${new Date().toLocaleString()}\n`);
   }
